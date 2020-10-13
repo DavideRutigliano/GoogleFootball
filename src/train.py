@@ -10,6 +10,8 @@ from .utils import collect_data, train_loop
 from .FootballEnvironment import FootballEnvironment
 from .DeepQNetwork import DeepQNetwork
 
+from tensorflow.python.framework import tensor_spec
+
 AUTO = tf.data.experimental.AUTOTUNE
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -31,9 +33,6 @@ def main():
     num_episodes = 5
     steps_per_episode = 3001
 
-    num_iterations = num_episodes * steps_per_episode
-    log_interval = 1
-
     gamma = 0.99
     epsilon = 0.7
 
@@ -43,8 +42,6 @@ def main():
 
     batch_size = 128
     learning_rate = 1e-3
-
-    num_eval_episodes = 1
 
     train_py_env = suite_gym.load("GFootball-11_vs_11_kaggle-SMM-v0")
     train_env = FootballEnvironment(train_py_env)
@@ -113,6 +110,52 @@ def main():
                collect_steps_per_iteration,
                num_episodes,
                steps_per_episode)
+
+    observation = tensor_spec.BoundedTensorSpec(
+        shape=(1, 72, 96, 4),
+        dtype=np.float32,
+        name='observation',
+        minimum=0.,
+        maximum=255.,
+    )
+
+    reward = tf.TensorSpec(
+        shape=(1,),
+        dtype=np.float32,
+        name='reward'
+    )
+
+    step_type_spec = tf.TensorSpec(
+        shape=(1,),
+        dtype=np.int32,
+        name='step_type'
+    )
+
+    discount_spec = tensor_spec.BoundedTensorSpec(
+        shape=(1,),
+        dtype=np.float32,
+        minimum=0.,
+        maximum=1.,
+        name='discount'
+    )
+
+    time_step_spec = TimeStep(
+        observation=observation,
+        reward=reward,
+        step_type=step_type_spec,
+        discount=discount_spec
+    )
+
+    @common.function
+    def get_action(time_step):
+        return agent.policy.action(time_step, ()).action
+
+    setattr(agent.policy, 'get_action', get_action)
+    act = agent.policy.get_action.get_concrete_function(time_step_spec)
+
+    tf.saved_model.save(agent.policy,
+                        'policy',
+                        {'get_action': act})
 
 
 if __name__ == '__main__':
